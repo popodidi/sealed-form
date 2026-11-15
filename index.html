@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<title>Sealed form</title>
+<link rel="stylesheet" href="style.css">
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<main>
+  <section id="loading"><p class="muted">Checking the form...</p></section>
+  <section id="error" hidden>
+    <h1>Cannot open this form</h1>
+    <p id="error-text"></p>
+  </section>
+  <section id="ask" hidden>
+    <h1 id="purpose"></h1>
+    <p id="from" class="muted"></p>
+    <form id="fields" autocomplete="off" novalidate></form>
+    <p id="ask-error" class="error" role="alert"></p>
+    <button id="seal" class="primary" type="submit" form="fields">Seal and send</button>
+    <dl class="meta">
+      <dt>Dispatcher key</dt><dd><code id="fingerprint"></code></dd>
+      <dt>Expires</dt><dd id="expires"></dd>
+    </dl>
+    <p id="key-note" class="muted"></p>
+    <p class="muted">Your values are encrypted in this browser to the dispatcher's key. This page sends nothing anywhere; only the sealed reply leaves it.</p>
+  </section>
+  <section id="copy" hidden>
+    <h1>Sealed</h1>
+    <p>Paste this reply into the chat that sent you the link, or send the file.</p>
+    <textarea id="sealed" rows="6" readonly spellcheck="false"></textarea>
+    <div class="actions">
+      <button id="copy-button" class="primary" type="button">Copy</button>
+      <a id="download" class="button">Download .sealed file</a>
+    </div>
+  </section>
+  <section id="sent" hidden>
+    <h1>Sent</h1>
+    <p id="sent-text"></p>
+  </section>
+</main>
+</body>
+</html>
