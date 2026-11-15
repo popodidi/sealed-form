@@ -1,0 +1,56 @@
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --surface-2: #f4f4f4;
+  --text-primary: #202020;
+  --text-secondary: #606060;
+  --border-control: #858585;
+  --action-bg: #202020;
+  --action-fg: #ffffff;
+  --danger: #b42318;
+  --warning: #8a5a00;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #181818;
+    --surface-2: #242424;
+    --text-primary: #ededed;
+    --text-secondary: #b0b0b0;
+    --action-bg: #ededed;
+    --action-fg: #181818;
+    --danger: #ff8a80;
+    --warning: #f0c36d;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text-primary); line-height: 1.5; }
+main { max-width: 32rem; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 0.25rem; }
+p { margin: 0.5rem 0; }
+.muted { color: var(--text-secondary); font-size: 0.875rem; }
+.error { color: var(--danger); min-height: 1.5em; }
+.warn { color: var(--warning); font-weight: 600; }
+form { margin: 1.25rem 0 0.5rem; display: grid; gap: 1rem; }
+.field { display: grid; gap: 0.25rem; }
+label { font-weight: 600; font-size: 0.9375rem; }
+input, textarea, select {
+  font: inherit; color: inherit; width: 100%;
+  background: var(--surface-2); border: 1px solid var(--border-control);
+  border-radius: 8px; padding: 0.625rem 0.75rem;
+}
+input[type="file"] { padding: 0.5rem; }
+textarea { resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8125rem; }
+button, .button {
+  font: inherit; font-weight: 600; border-radius: 8px; padding: 0.625rem 1rem;
+  border: 1px solid var(--border-control); background: transparent; color: inherit;
+  cursor: pointer; text-decoration: none; display: inline-block;
+}
+button.primary { background: var(--action-bg); color: var(--action-fg); border-color: var(--action-bg); width: 100%; }
+.actions { display: grid; gap: 0.5rem; margin-top: 0.75rem; }
+.actions .button { text-align: center; }
+:focus-visible { outline: 2px solid var(--text-primary); outline-offset: 2px; }
+.meta { display: grid; grid-template-columns: auto 1fr; gap: 0.25rem 1rem; margin: 1.5rem 0 0.5rem; font-size: 0.875rem; }
+.meta dt { color: var(--text-secondary); }
+.meta dd { margin: 0; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8125rem; word-break: break-all; }
