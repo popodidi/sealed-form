@@ -24,6 +24,7 @@
   }
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body { margin: 0; background: var(--bg); color: var(--text-primary); line-height: 1.5; }
 main { max-width: 32rem; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
 h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 0.25rem; }
@@ -46,7 +47,7 @@ button, .button {
   border: 1px solid var(--border-control); background: transparent; color: inherit;
   cursor: pointer; text-decoration: none; display: inline-block;
 }
-button.primary { background: var(--action-bg); color: var(--action-fg); border-color: var(--action-bg); width: 100%; }
+button.primary, .button.primary { background: var(--action-bg); color: var(--action-fg); border-color: var(--action-bg); width: 100%; }
 .actions { display: grid; gap: 0.5rem; margin-top: 0.75rem; }
 .actions .button { text-align: center; }
 :focus-visible { outline: 2px solid var(--text-primary); outline-offset: 2px; }
@@ -54,3 +55,5 @@ button.primary { background: var(--action-bg); color: var(--action-fg); border-c
 .meta dt { color: var(--text-secondary); }
 .meta dd { margin: 0; }
 code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8125rem; word-break: break-all; }
+.check { display: flex; gap: 0.5rem; align-items: center; font-weight: 400; }
+.check input { width: auto; }

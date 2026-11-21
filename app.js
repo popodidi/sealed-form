@@ -2,7 +2,10 @@
 // seals the values in this browser and hands back only the sealed reply.
 // No third-party script runs here: the Telegram return path uses the
 // client's own bridge (web_app_data_send) directly.
-import { tokenFrom, openSpec, seal, checkValues, b64Encode } from "./sealed.js";
+import {
+  tokenFrom, openSpec, seal, checkValues, b64Encode, b64urlDecode,
+  messageFrom, parseMessage, replyKey, openMessage,
+} from "./sealed.js";
 
 const TG_LIMIT = 4096;
 const $ = (id) => document.getElementById(id);
@@ -87,7 +90,147 @@ async function readFile(file) {
   return { name: file.name, data: b64Encode(buf) };
 }
 
+// --- sealed messages: decrypt a message from the dispatcher (#m=) ---
+
+const KEY_DB = "sealed-form";
+
+/** IndexedDB holding remembered (non-extractable) reply keys by salt. */
+function keyStore(mode, fn) {
+  return new Promise((resolve) => {
+    let req;
+    try {
+      req = indexedDB.open(KEY_DB, 1);
+    } catch (_) {
+      return resolve(null);
+    }
+    req.onupgradeneeded = () => req.result.createObjectStore("keys");
+    req.onerror = () => resolve(null);
+    req.onsuccess = () => {
+      try {
+        const tx = req.result.transaction("keys", mode);
+        const r = fn(tx.objectStore("keys"));
+        tx.oncomplete = () => resolve(r && "result" in r ? r.result : null);
+        tx.onerror = () => resolve(null);
+      } catch (_) {
+        resolve(null);
+      }
+    };
+  });
+}
+
+const keyId = (h) => h.salt + ":" + h.iter;
+
+/** Records an opened message id; returns when it was opened before, or null. */
+function seen(id) {
+  const k = "sealed-form:opened:" + id;
+  try {
+    const before = localStorage.getItem(k);
+    if (!before) localStorage.setItem(k, new Date().toISOString());
+    return before;
+  } catch (_) {
+    return null;
+  }
+}
+
+function showBody(header, body, tg) {
+  $("shown-purpose").textContent = body.purpose || "Sealed message";
+  $("shown-from").textContent = "From " + header.from;
+  const before = seen(header.id);
+  $("shown-note").textContent = before
+    ? `You opened this message on this device before (${new Date(before).toLocaleString()}).`
+    : "";
+  if (body.kind === "secret") {
+    const v = $("secret-value");
+    v.value = body.secret;
+    $("secret-show").addEventListener("click", () => {
+      v.type = v.type === "password" ? "text" : "password";
+      $("secret-show").textContent = v.type === "password" ? "Show" : "Hide";
+    });
+    $("secret-copy").addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(v.value);
+        $("secret-copy").textContent = "Copied";
+      } catch (_) {
+        v.type = "text";
+        v.select();
+      }
+    });
+    $("shown-secret").hidden = false;
+  } else if (body.kind === "link") {
+    const a = $("link-open");
+    a.href = body.link;
+    if (tg) {
+      a.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        tg("web_app_open_link", { url: body.link });
+      });
+    }
+    $("shown-link").hidden = false;
+  } else {
+    const bytes = b64urlDecode(body.file.data.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""));
+    const a = $("file-download");
+    a.href = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
+    a.download = body.file.name || "file";
+    a.textContent = "Download " + a.download;
+    $("shown-file").hidden = false;
+  }
+  show("shown");
+}
+
+async function messageMain(text, tg) {
+  let msg;
+  try {
+    msg = parseMessage(text);
+  } catch (e) {
+    return fail(e.message);
+  }
+  const { header } = msg;
+  if (Date.now() > msg.expires) return fail("This message expired at " + new Date(msg.expires).toLocaleString() + ".");
+  if (tg) {
+    tg("web_app_ready", {});
+    tg("web_app_expand", {});
+  }
+  const open = async (key) => showBody(header, await openMessage(msg, key), tg);
+  const remembered = await keyStore("readonly", (s) => s.get(keyId(header)));
+  if (remembered) {
+    try {
+      return await open(remembered);
+    } catch (_) {
+      // A replaced key: ask for the passphrase.
+    }
+  }
+  $("msg-from").textContent = "From " + header.from;
+  $("msg-expires").textContent = new Date(msg.expires).toLocaleString();
+  show("message");
+  $("msg-pass").focus();
+  $("msg-open").addEventListener("click", async (ev) => {
+    ev.preventDefault();
+    $("msg-error").textContent = "";
+    $("msg-open").disabled = true;
+    $("msg-note").textContent = "Opening...";
+    try {
+      const key = await replyKey($("msg-pass").value, header.salt, header.iter);
+      $("msg-pass").value = "";
+      const body = await openMessage(msg, key);
+      if ($("msg-remember").checked) await keyStore("readwrite", (s) => s.put(key, keyId(header)));
+      showBody(header, body, tg);
+    } catch (e) {
+      $("msg-error").textContent = e.message;
+    } finally {
+      $("msg-open").disabled = false;
+      $("msg-note").textContent = "";
+    }
+  });
+}
+
 async function main() {
+  const message = messageFrom(location.hash);
+  if (message) {
+    const tg = telegram();
+    // The ciphertext stays out of history.
+    history.replaceState(null, "", location.pathname);
+    return messageMain(message, tg);
+  }
   const token = tokenFrom(location.hash, location.search);
   // The spec stays out of history and any later navigation.
   if (location.hash) history.replaceState(null, "", location.pathname);

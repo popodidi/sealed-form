@@ -38,6 +38,41 @@
       <a id="download" class="button">Download .sealed file</a>
     </div>
   </section>
+  <section id="message" hidden>
+    <h1>Sealed message</h1>
+    <p id="msg-from" class="muted"></p>
+    <form id="msg-unlock" autocomplete="off" novalidate>
+      <div class="field">
+        <label for="msg-pass">Passphrase</label>
+        <input id="msg-pass" type="password" autocomplete="off" spellcheck="false" autocapitalize="off">
+      </div>
+      <label class="check"><input id="msg-remember" type="checkbox"> Remember on this device</label>
+    </form>
+    <p id="msg-error" class="error" role="alert"></p>
+    <button id="msg-open" class="primary" type="submit" form="msg-unlock">Open</button>
+    <dl class="meta">
+      <dt>Expires</dt><dd id="msg-expires"></dd>
+    </dl>
+    <p id="msg-note" class="muted"></p>
+    <p class="muted">The message is decrypted in this browser with your passphrase. This page sends nothing anywhere.</p>
+  </section>
+  <section id="shown" hidden>
+    <h1 id="shown-purpose"></h1>
+    <p id="shown-from" class="muted"></p>
+    <div id="shown-secret" class="actions" hidden>
+      <input id="secret-value" type="password" readonly spellcheck="false">
+      <button id="secret-show" type="button">Show</button>
+      <button id="secret-copy" class="primary" type="button">Copy</button>
+    </div>
+    <div id="shown-link" class="actions" hidden>
+      <a id="link-open" class="button primary" rel="noopener noreferrer" target="_blank">Open link</a>
+      <p class="muted">Works once. Opens in your browser.</p>
+    </div>
+    <div id="shown-file" class="actions" hidden>
+      <a id="file-download" class="button primary">Download</a>
+    </div>
+    <p id="shown-note" class="muted"></p>
+  </section>
   <section id="sent" hidden>
     <h1>Sent</h1>
     <p id="sent-text"></p>
