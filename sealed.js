@@ -136,3 +136,70 @@ export function checkValues(spec, values) {
   }
   return null;
 }
+
+// ---------------------------------------------------------------- messages
+//
+// Sealed messages go the other way: a dispatcher sends the owner a secret,
+// a link or a small file. Link fragment: m=<base64url header JSON>.<base64url
+// iv (12) | AES-256-GCM ciphertext and tag>. The AES key is PBKDF2-HMAC-SHA256
+// of the owner's passphrase with the header's salt and iteration count; the
+// associated data is the header's base64url text exactly as in the link.
+
+export const MESSAGE_VERSION = 1;
+const KINDS_OUT = ["secret", "link", "file"];
+
+/** The `m=` message text from a URL's fragment, or null. */
+export function messageFrom(hash) {
+  for (const part of (hash || "").replace(/^#/, "").split(/[#&]/)) {
+    if (part.startsWith("m=")) return decodeURIComponent(part.slice(2));
+  }
+  return null;
+}
+
+/** Splits and checks a message's header (authenticated only on opening). */
+export function parseMessage(text) {
+  const dot = text.indexOf(".");
+  if (dot < 0) throw new Error("not a sealed message");
+  const aad = text.slice(0, dot);
+  const data = b64urlDecode(text.slice(dot + 1));
+  const header = JSON.parse(new TextDecoder().decode(b64urlDecode(aad)));
+  if (header.v !== MESSAGE_VERSION) throw new Error("unsupported message version " + header.v);
+  if (!/^[0-9a-f]{32}$/.test(header.id)) throw new Error("invalid message id");
+  if (!/^[A-Za-z0-9_-]{16,64}$/.test(header.salt)) throw new Error("invalid key salt");
+  if (!Number.isInteger(header.iter) || header.iter < 1 || header.iter > 10000000) {
+    throw new Error("invalid key iteration count");
+  }
+  const expires = Date.parse(header.expires);
+  if (!Number.isFinite(expires)) throw new Error("invalid expiry");
+  if (data.length <= 12 + 16) throw new Error("truncated message");
+  return { header, aad, data, expires };
+}
+
+/** The AES key from the passphrase (non-extractable, decrypt only). */
+export async function replyKey(passphrase, salt, iter) {
+  const base = await subtle.importKey(
+    "raw", new TextEncoder().encode(passphrase), "PBKDF2", false, ["deriveKey"]);
+  return subtle.deriveKey(
+    { name: "PBKDF2", hash: "SHA-256", salt: b64urlDecode(salt), iterations: iter },
+    base, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+}
+
+/**
+ * Opens a parsed message with `key`; returns the body {purpose, kind, ...}.
+ * Throws past the expiry or when the key or any byte is wrong.
+ */
+export async function openMessage(msg, key, now = Date.now()) {
+  if (now > msg.expires) throw new Error("this message expired at " + msg.header.expires);
+  let plain;
+  try {
+    plain = await subtle.decrypt(
+      { name: "AES-GCM", iv: msg.data.subarray(0, 12), additionalData: new TextEncoder().encode(msg.aad) },
+      key, msg.data.subarray(12));
+  } catch (_) {
+    throw new Error("wrong passphrase, or the message was altered");
+  }
+  const body = JSON.parse(new TextDecoder().decode(plain));
+  if (!KINDS_OUT.includes(body.kind)) throw new Error("unknown message kind");
+  if (body.kind === "link" && !/^https?:\/\//.test(body.link)) throw new Error("not a web link");
+  return body;
+}

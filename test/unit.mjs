@@ -35,3 +35,27 @@ assert.match(checkValues(spec, { token: "a\nb" }), /one line/);
 assert.match(checkValues(spec, { token: "x", plan: "b" }), /choice/);
 assert.equal(checkValues(spec, { token: "x", plan: "a" }), null);
 console.log("unit: ok");
+
+// Sealed messages: the vector axe seals (crates/axe/tests/fixtures/
+// sealed-message-vector.txt; passphrase "correct horse battery", 1000
+// iterations, expires 2096).
+import { readFileSync } from "node:fs";
+import { messageFrom, parseMessage, replyKey, openMessage } from "../sealed.js";
+const vector = readFileSync(new URL("./message-vector.txt", import.meta.url), "utf8").trim();
+assert.equal(messageFrom("#m=" + vector + "&tgWebAppData=x"), vector);
+assert.equal(messageFrom("#f=abc.def"), null);
+const msg = parseMessage(vector);
+assert.equal(msg.header.from, "task 7");
+const key = await replyKey("correct horse battery", msg.header.salt, msg.header.iter);
+const now = Date.parse("2090-01-01T00:00:00Z");
+const body = await openMessage(msg, key, now);
+assert.deepEqual(body, { purpose: "Web login", kind: "link", link: "http://axe.example/login?code=vector" });
+await assert.rejects(openMessage(msg, key, Date.parse("2097-01-01T00:00:00Z")), /expired/);
+const wrong = await replyKey("wrong horse battery", msg.header.salt, msg.header.iter);
+await assert.rejects(openMessage(msg, wrong, now), /wrong passphrase/);
+// A header edit (a later expiry) fails the tag.
+const hdr = { ...msg.header, expires: "2099-01-01T00:00:00Z" };
+const forgedMsg = parseMessage(b64urlEncode(new TextEncoder().encode(JSON.stringify(hdr))) + vector.slice(vector.indexOf(".")));
+await assert.rejects(openMessage(forgedMsg, key, now), /altered/);
+assert.throws(() => parseMessage("nodot"));
+console.log("messages: ok");

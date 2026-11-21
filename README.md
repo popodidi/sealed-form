@@ -18,6 +18,14 @@ it; [axe](https://github.com/popodidi/axe) (`axe form ask`) does.
   the reply as `web_app_data` (up to 4096 bytes) through the client's bridge.
   Anywhere else it shows the reply to copy, or to download as a `.sealed` file.
 
+- **Messages.** The reverse: `#m=<header>.<iv | ciphertext>` opens a message
+  a dispatcher sealed to the owner (a secret, a link to open with one tap, or
+  a small file). The page asks for the owner's passphrase, derives the key
+  (PBKDF2-HMAC-SHA256 with the header's salt and count) and decrypts with
+  AES-256-GCM, the header as associated data. It refuses a message past its
+  expiry, can remember the derived key (non-extractable, IndexedDB) and warns
+  when a message was opened on this device before.
+
 Everything is in [`sealed.js`](sealed.js) (crypto) and [`app.js`](app.js)
 (page). There is no build step and no third-party script, and the CSP allows
 no network connections.
