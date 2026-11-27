@@ -3,7 +3,7 @@
 // No third-party script runs here: the Telegram return path uses the
 // client's own bridge (web_app_data_send) directly.
 import {
-  tokenFrom, openSpec, seal, checkValues, b64Encode, b64urlDecode,
+  tokenFrom, openSpec, seal, checkValues, fieldProblem, b64Encode, b64urlDecode,
   messageFrom, parseMessage, replyKeyBits, importReplyKey, openMessage,
 } from "./sealed.js";
 import { keyId, newPrfSalt, saveWrapped, passkeyState, unlock, discard, forget, memoryStore } from "./device.js";
@@ -85,6 +85,33 @@ function input(f) {
   el.name = f.name;
   el.required = !!f.required;
   return el;
+}
+
+/** A secret's input with a Show/Hide toggle; the value starts hidden. */
+function withToggle(el) {
+  const wrap = document.createElement("div");
+  wrap.className = "secret";
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "toggle";
+  b.textContent = "Show";
+  b.setAttribute("aria-controls", el.id);
+  b.setAttribute("aria-pressed", "false");
+  b.addEventListener("click", () => {
+    const hidden = el.type === "password";
+    el.type = hidden ? "text" : "password";
+    b.textContent = hidden ? "Hide" : "Show";
+    b.setAttribute("aria-pressed", String(hidden));
+  });
+  wrap.append(el, b);
+  return wrap;
+}
+
+/** A field's raw value as fieldProblem takes it (a file as {size}). */
+function rawValue(f, el) {
+  if (f.type !== "file") return el.value;
+  const file = el.files && el.files[0];
+  return file ? { size: file.size } : null;
 }
 
 async function readFile(file) {
@@ -386,13 +413,38 @@ async function main() {
     note.classList.add("warn");
   }
   const form = $("fields");
+  // Each field's problem shows under it as it is typed; the seal waits until
+  // every field is fixed. "Required" shows only after a seal attempt.
+  let tried = false;
+  const problems = () => spec.fields.map((f) => [f, fieldProblem(f, rawValue(f, $("field-" + f.name)))]);
+  const refresh = () => {
+    let blocked = false;
+    for (const [f, p] of problems()) {
+      const el = $("field-" + f.name);
+      const empty = p && f.required && !rawValue(f, el);
+      const shown = p && (tried || !empty) ? p : "";
+      $("problem-" + f.name).textContent = shown;
+      el.setAttribute("aria-invalid", shown ? "true" : "false");
+      if (p && !empty) blocked = true;
+    }
+    $("seal").disabled = blocked;
+    if (!blocked) $("ask-error").textContent = "";
+    return blocked;
+  };
   for (const f of spec.fields) {
     const row = document.createElement("div");
     row.className = "field";
     const label = document.createElement("label");
     label.htmlFor = "field-" + f.name;
     label.textContent = (f.label || f.name) + (f.required ? "" : " (optional)");
-    row.append(label, input(f));
+    const el = input(f);
+    const problem = document.createElement("p");
+    problem.id = "problem-" + f.name;
+    problem.className = "error field-error";
+    problem.setAttribute("aria-live", "polite");
+    el.setAttribute("aria-describedby", problem.id);
+    el.addEventListener(f.type === "choice" || f.type === "file" ? "change" : "input", refresh);
+    row.append(label, f.type === "secret" ? withToggle(el) : el, problem);
     form.append(row);
   }
   show("ask");
@@ -417,9 +469,13 @@ async function main() {
         if (el.value !== "") values[f.name] = el.value;
       }
     }
+    tried = true;
+    refresh();
     const problem = checkValues(spec, raw);
     if (problem) {
       $("ask-error").textContent = problem;
+      const first = spec.fields.find((f) => fieldProblem(f, raw[f.name]));
+      if (first) $("field-" + first.name).focus();
       return;
     }
     try {

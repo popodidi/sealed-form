@@ -68,6 +68,15 @@ export async function fingerprint(rawKey) {
 
 const KINDS = ["secret", "text", "code", "choice", "file"];
 
+function validCheck(c) {
+  if (!c || typeof c !== "object" || Array.isArray(c)) return false;
+  const known = ["prefix", "min", "max", "chars"];
+  if (Object.keys(c).some((k) => !known.includes(k))) return false;
+  const count = (n) => n === undefined || (Number.isInteger(n) && n >= 0);
+  return (c.prefix === undefined || typeof c.prefix === "string") && count(c.min) && count(c.max)
+    && (c.chars === undefined || c.chars === "digits" || c.chars === "nospace");
+}
+
 /**
  * Checks the token's signature against the key it names and the form's
  * shape; returns {spec, rawKey, fingerprint}. Throws on any mismatch.
@@ -93,6 +102,9 @@ export async function openSpec(token, now = Date.now()) {
     if (!/^[a-z][a-z0-9_]{0,31}$/.test(f.name) || !KINDS.includes(f.type)) {
       throw new Error("invalid field " + JSON.stringify(f.name));
     }
+    if (f.check !== undefined && !validCheck(f.check)) {
+      throw new Error("invalid check on field " + JSON.stringify(f.name));
+    }
   }
   return { spec, rawKey, fingerprint: await fingerprint(rawKey), expires };
 }
@@ -116,23 +128,68 @@ export async function seal(spec, rawKey, values) {
   return PREFIX + spec.form + "." + b64urlEncode(concat(ephRaw, iv, ct));
 }
 
-/** Checks values against the fields before sealing; returns an error or null. */
-export function checkValues(spec, values) {
+const DEFAULT_MAX = { secret: 4096, text: 1024, code: 64, choice: 64, file: 2048 };
+
+function plural(n, one, many) {
+  return n === 1 ? "1 " + one : n + " " + many;
+}
+
+/**
+ * The first problem with `v` under a field's format check `{prefix, min, max,
+ * chars: "digits" | "nospace"}`, worded to follow the field's label
+ * ("contains 2 spaces: likely a wrapped line"), or null. The same words as
+ * the dispatcher's own check (axe `Check::problem`). Never quotes the value.
+ */
+export function formatProblem(check, v) {
+  if (!check) return null;
+  if (check.chars) {
+    const ws = [...v].filter((c) => /\s/u.test(c));
+    if (ws.length) {
+      const breaks = ws.filter((c) => c === "\n" || c === "\r").length;
+      const spaces = ws.filter((c) => c === " ").length;
+      const what = breaks === ws.length ? plural(ws.length, "line break", "line breaks")
+        : spaces === ws.length ? plural(ws.length, "space", "spaces")
+        : plural(ws.length, "whitespace character", "whitespace characters");
+      return /\s/u.test(v.trim()) ? `contains ${what}: likely a wrapped line` : `contains ${what} at the start or end`;
+    }
+  }
+  const prefix = check.prefix || "";
+  if (!v.startsWith(prefix)) return "must start with " + prefix;
+  if (check.chars === "digits" && !/^[0-9]*$/.test(v)) return "must be digits only";
+  const len = [...v].length;
+  const lo = check.min ?? null;
+  const hi = check.max ?? null;
+  if (lo !== null && lo === hi && len !== lo) return `is ${len} characters; expected ${lo}`;
+  if (lo !== null && len < lo) return `is too short (${len} characters; expected at least ${lo})`;
+  if (hi !== null && len > hi) return `is too long (${len} characters; expected at most ${hi})`;
+  return null;
+}
+
+/**
+ * One field's problem with its raw value (a file as {size}), or null: the
+ * same checks the dispatcher runs, in the same order.
+ */
+export function fieldProblem(f, v) {
+  const name = f.label || f.name;
+  const empty = v === undefined || v === null || v === "";
+  if (empty) return f.required ? `${name} is required` : null;
   const enc = new TextEncoder();
+  const max = f.max ?? DEFAULT_MAX[f.type];
+  const size = f.type === "file" ? v.size : enc.encode(v).length;
+  if (size > max) return `${name} is over ${max} bytes`;
+  if (f.type === "choice" && !f.choices.includes(v)) return `${name}: pick a choice`;
+  if (f.type === "file") return null;
+  const p = formatProblem(f.check, v);
+  if (p) return `${name} ${p}`;
+  if (f.type !== "text" && /[\r\n\0]/.test(v)) return `${name}: one line only`;
+  return null;
+}
+
+/** Checks values against the fields before sealing; returns the first error or null. */
+export function checkValues(spec, values) {
   for (const f of spec.fields) {
-    const v = values[f.name];
-    const empty = v === undefined || v === null || v === "";
-    if (empty) {
-      if (f.required) return `${f.label || f.name} is required`;
-      continue;
-    }
-    const max = f.max ?? { secret: 4096, text: 1024, code: 64, choice: 64, file: 2048 }[f.type];
-    const size = f.type === "file" ? v.size : enc.encode(v).length;
-    if (size > max) return `${f.label || f.name} is over ${max} bytes`;
-    if (f.type === "choice" && !f.choices.includes(v)) return `${f.label || f.name}: pick a choice`;
-    if (f.type !== "text" && f.type !== "file" && /[\r\n\0]/.test(v)) {
-      return `${f.label || f.name}: one line only`;
-    }
+    const p = fieldProblem(f, values[f.name]);
+    if (p) return p;
   }
   return null;
 }

@@ -34,6 +34,45 @@ assert.match(checkValues(spec, {}), /required/);
 assert.match(checkValues(spec, { token: "a\nb" }), /one line/);
 assert.match(checkValues(spec, { token: "x", plan: "b" }), /choice/);
 assert.equal(checkValues(spec, { token: "x", plan: "a" }), null);
+// Format checks: the same words as the dispatcher's (axe sealed.rs
+// `field_checks_name_the_problem`), never the value.
+import { formatProblem, fieldProblem } from "../sealed.js";
+const c = { prefix: "sk-", min: 10, max: 20, chars: "nospace" };
+assert.equal(formatProblem(c, "sk-abcdefgh"), null);
+assert.equal(formatProblem(c, "sk-abc  defgh"), "contains 2 spaces: likely a wrapped line");
+assert.equal(formatProblem(c, "sk-abc\ndefgh"), "contains 1 line break: likely a wrapped line");
+assert.equal(formatProblem(c, " sk-abcdefgh"), "contains 1 space at the start or end");
+assert.equal(formatProblem(c, "sk-ab\tc defgh"), "contains 2 whitespace characters: likely a wrapped line");
+assert.equal(formatProblem(c, "pk-abcdefgh"), "must start with sk-");
+assert.equal(formatProblem(c, "sk-a"), "is too short (4 characters; expected at least 10)");
+assert.equal(formatProblem(c, "sk-" + "a".repeat(30)), "is too long (33 characters; expected at most 20)");
+const digits = { min: 6, max: 6, chars: "digits" };
+assert.equal(formatProblem(digits, "123456"), null);
+assert.equal(formatProblem(digits, "12a456"), "must be digits only");
+assert.equal(formatProblem(digits, "12345"), "is 5 characters; expected 6");
+assert.equal(formatProblem(digits, "123 456"), "contains 1 space: likely a wrapped line");
+// Without chars, whitespace is fine (a passphrase); no check, no problem.
+assert.equal(formatProblem({ min: 3 }, "a b c"), null);
+assert.equal(formatProblem(undefined, " x "), null);
+// Length counts characters, not bytes or UTF-16 units.
+assert.equal(formatProblem({ min: 2, max: 2 }, "\u{1F600}\u{1F600}"), null);
+// A setup-token from a wrapped terminal line: the field's label leads.
+const tok = { name: "secret", label: "setup-token token", type: "secret", required: true,
+  check: { prefix: "sk-ant-oat01-", min: 90, max: 256, chars: "nospace" } };
+const good = "sk-ant-oat01-" + "x".repeat(95);
+assert.equal(fieldProblem(tok, good), null);
+assert.equal(fieldProblem(tok, good.slice(0, 50) + " " + good.slice(50, 90) + " " + good.slice(90)),
+  "setup-token token contains 2 spaces: likely a wrapped line");
+assert.equal(fieldProblem(tok, ""), "setup-token token is required");
+assert.match(checkValues({ fields: [tok] }, { secret: "sk-ant-api03-" + "x".repeat(95) }), /must start with sk-ant-oat01-$/);
+// The size and one-line checks still apply; a check never fires on an empty optional field.
+assert.equal(fieldProblem({ name: "n", type: "code", check: { chars: "digits" } }, ""), null);
+assert.equal(fieldProblem({ name: "n", type: "code" }, "a\nb"), "n: one line only");
+// A spec with a malformed check is refused.
+const badSpec = { ...spec, fields: [{ name: "t", type: "secret", check: { regex: "x" } }] };
+const badEnc = new TextEncoder().encode(JSON.stringify(badSpec));
+const badSig = new Uint8Array(await s.sign({ name: "ECDSA", hash: "SHA-256" }, kp.privateKey, badEnc));
+await assert.rejects(openSpec(b64urlEncode(badEnc) + "." + b64urlEncode(badSig)), /invalid check/);
 console.log("unit: ok");
 
 // Sealed messages: the vector axe seals (crates/axe/tests/fixtures/

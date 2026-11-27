@@ -10,6 +10,14 @@ it; [axe](https://github.com/popodidi/axe) (`axe form ask`) does.
   spec. The fragment is never sent to the page's host.
 - **Checks.** The signature, the expiry and each field's shape. The page shows
   the key's fingerprint and remembers it per issuer, warning if it changes.
+- **Format checks.** A secret, text or code field may carry
+  `"check": {"prefix", "min", "max", "chars": "digits" | "nospace"}` (lengths
+  in characters). The page shows the first problem under the field as it is
+  typed ("contains 2 spaces: likely a wrapped line", "must start with
+  sk-ant-oat01-") and holds "Seal and send" until it is fixed. It never trims
+  or rewrites a value; the recipient should run the same check
+  (`formatProblem` in [`sealed.js`](sealed.js)).
+- **Secrets** are masked, with a Show/Hide toggle beside each.
 - **Sealing.** Ephemeral ECDH P-256, HKDF-SHA256 (salt: ephemeral then
   recipient public key, info `sealed-form v1`), AES-256-GCM with
   `<form>|<dispatcher>|<expires>` as associated data. The reply is
