@@ -4,8 +4,10 @@
 // client's own bridge (web_app_data_send) directly.
 import {
   tokenFrom, openSpec, seal, checkValues, b64Encode, b64urlDecode,
-  messageFrom, parseMessage, replyKey, openMessage,
+  messageFrom, parseMessage, replyKeyBits, importReplyKey, openMessage,
 } from "./sealed.js";
+import { keyId, newPrfSalt, saveWrapped, passkeyState, unlock, discard, forget, memoryStore } from "./device.js";
+import { passkeySupported, createPasskey, passkey } from "./passkey.js";
 
 const TG_LIMIT = 4096;
 const $ = (id) => document.getElementById(id);
@@ -93,32 +95,54 @@ async function readFile(file) {
 // --- sealed messages: decrypt a message from the dispatcher (#m=) ---
 
 const KEY_DB = "sealed-form";
+const STORES = ["keys", "passkeys"];
 
-/** IndexedDB holding remembered (non-extractable) reply keys by salt. */
-function keyStore(mode, fn) {
-  return new Promise((resolve) => {
+/**
+ * An IndexedDB object store as an async {get, put, delete, keys}: "keys"
+ * holds remembered (non-extractable) reply keys, "passkeys" reply keys
+ * wrapped to a passkey (device.js), both by reply key id.
+ */
+function idbStore(name) {
+  const run = (mode, fn) => new Promise((resolve, reject) => {
     let req;
     try {
-      req = indexedDB.open(KEY_DB, 1);
-    } catch (_) {
-      return resolve(null);
+      req = indexedDB.open(KEY_DB, 2);
+    } catch (e) {
+      return reject(e);
     }
-    req.onupgradeneeded = () => req.result.createObjectStore("keys");
-    req.onerror = () => resolve(null);
+    req.onupgradeneeded = () => {
+      for (const s of STORES) if (!req.result.objectStoreNames.contains(s)) req.result.createObjectStore(s);
+    };
+    req.onerror = () => reject(req.error);
     req.onsuccess = () => {
       try {
-        const tx = req.result.transaction("keys", mode);
-        const r = fn(tx.objectStore("keys"));
-        tx.oncomplete = () => resolve(r && "result" in r ? r.result : null);
-        tx.onerror = () => resolve(null);
-      } catch (_) {
-        resolve(null);
+        const tx = req.result.transaction(name, mode);
+        const r = fn(tx.objectStore(name));
+        tx.oncomplete = () => resolve(r && "result" in r ? r.result : undefined);
+        tx.onerror = () => reject(tx.error);
+      } catch (e) {
+        reject(e);
       }
     };
   });
+  return {
+    get: (k) => run("readonly", (s) => s.get(k)).then((v) => v ?? null),
+    put: (k, v) => run("readwrite", (s) => s.put(v, k)),
+    delete: (k) => run("readwrite", (s) => s.delete(k)),
+    keys: () => run("readonly", (s) => s.getAllKeys()).then((v) => v || []),
+  };
 }
 
-const keyId = (h) => h.salt + ":" + h.iter;
+/** The store, or an in-memory one when this browser keeps no IndexedDB. */
+async function deviceStore(name) {
+  const s = idbStore(name);
+  try {
+    await s.keys();
+    return s;
+  } catch (_) {
+    return memoryStore();
+  }
+}
 
 /** Records an opened message id; returns when it was opened before, or null. */
 function seen(id) {
@@ -177,6 +201,46 @@ function showBody(header, body, tg) {
   show("shown");
 }
 
+/** After a passphrase unlock: offers to wrap the reply key `raw` to a passkey. */
+function offerPasskey(passkeys, header, raw) {
+  const btn = $("enroll-button");
+  const note = $("enroll-note");
+  let pending = null; // {cred, prfSalt} when the passkey exists but gave no PRF output yet
+  const done = async (cred, prfSalt, prf) => {
+    await saveWrapped(passkeys, header, raw, cred, prfSalt, prf);
+    raw.fill(0);
+    btn.hidden = true;
+    note.textContent = "Done. Next time, open with Face ID; the passphrase still works.";
+    $("forget-device").hidden = false;
+  };
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    note.textContent = "";
+    try {
+      if (pending) {
+        await done(pending.cred, pending.prfSalt, await passkey.get(pending.cred, pending.prfSalt));
+        return;
+      }
+      const prfSalt = newPrfSalt();
+      const { cred, prf } = await createPasskey(prfSalt);
+      if (prf) return await done(cred, prfSalt, prf);
+      pending = { cred, prfSalt };
+      try {
+        await done(cred, prfSalt, await passkey.get(cred, prfSalt));
+      } catch (e) {
+        if (e.name !== "NotAllowedError") throw e;
+        btn.textContent = "Confirm with Face ID";
+        note.textContent = "Passkey made. Confirm once to finish.";
+      }
+    } catch (e) {
+      note.textContent = e.name === "NotAllowedError" ? "Cancelled." : e.message;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  $("enroll").hidden = false;
+}
+
 async function messageMain(text, tg) {
   let msg;
   try {
@@ -190,30 +254,93 @@ async function messageMain(text, tg) {
     tg("web_app_ready", {});
     tg("web_app_expand", {});
   }
+  // Mini App webviews (Telegram) lack passkeys for this host even where the
+  // API is present: send the owner to the system browser instead.
+  const [keys, passkeys, supported] = await Promise.all([
+    deviceStore("keys"), deviceStore("passkeys"), tg ? false : passkeySupported(),
+  ]);
+  $("forget-device").addEventListener("click", async () => {
+    const n = await forget(keys, passkeys);
+    $("forget-device").hidden = true;
+    $("enroll").hidden = true;
+    $("msg-passkey").hidden = true;
+    const out = n
+      ? "This device forgot its saved keys. The passkey itself stays in your passwords app; delete it there if you like."
+      : "Nothing was saved on this device.";
+    $("shown-note").textContent = out;
+    $("msg-note").textContent = out;
+  });
+  const showForget = async () => {
+    $("forget-device").hidden = (await keys.keys()).length + (await passkeys.keys()).length === 0;
+  };
   const open = async (key) => showBody(header, await openMessage(msg, key), tg);
-  const remembered = await keyStore("readonly", (s) => s.get(keyId(header)));
+
+  const remembered = await keys.get(keyId(header));
   if (remembered) {
     try {
-      return await open(remembered);
+      await open(remembered);
+      return showForget();
     } catch (_) {
-      // A replaced key: ask for the passphrase.
+      await keys.delete(keyId(header)); // a replaced reply key
     }
   }
+  const state = await passkeyState(passkeys, header);
   $("msg-from").textContent = "From " + header.from;
   $("msg-expires").textContent = new Date(msg.expires).toLocaleString();
   show("message");
-  $("msg-pass").focus();
+  await showForget();
+  if (state === "stale") {
+    $("msg-passkey-note").textContent = "Your reply key changed since Face ID was set up here. Enter the passphrase.";
+  } else if (state === "none" && tg) {
+    const b = $("msg-browser");
+    b.hidden = false;
+    b.addEventListener("click", () => {
+      tg("web_app_open_link", { url: location.origin + location.pathname + "#m=" + text });
+    });
+  }
+  if (state === "ready") {
+    const b = $("msg-passkey");
+    b.hidden = false;
+    b.focus();
+    b.addEventListener("click", async () => {
+      $("msg-error").textContent = "";
+      b.disabled = true;
+      try {
+        const key = await unlock(passkeys, header, passkey);
+        if (key) {
+          try {
+            return await open(key);
+          } catch (_) {
+            await discard(passkeys, header);
+          }
+        }
+        b.hidden = true;
+        $("msg-passkey-note").textContent = "Face ID no longer opens this reply key. Enter the passphrase.";
+        await showForget();
+      } catch (e) {
+        $("msg-error").textContent = e.name === "NotAllowedError" ? "Face ID was cancelled. Try again or use the passphrase." : e.message;
+      } finally {
+        b.disabled = false;
+      }
+    });
+  } else {
+    $("msg-pass").focus();
+  }
   $("msg-open").addEventListener("click", async (ev) => {
     ev.preventDefault();
     $("msg-error").textContent = "";
     $("msg-open").disabled = true;
     $("msg-note").textContent = "Opening...";
     try {
-      const key = await replyKey($("msg-pass").value, header.salt, header.iter);
+      const raw = await replyKeyBits($("msg-pass").value, header.salt, header.iter);
       $("msg-pass").value = "";
+      const key = await importReplyKey(raw);
       const body = await openMessage(msg, key);
-      if ($("msg-remember").checked) await keyStore("readwrite", (s) => s.put(key, keyId(header)));
+      if ($("msg-remember").checked) await keys.put(keyId(header), key);
       showBody(header, body, tg);
+      if (supported && state !== "ready" && !$("msg-remember").checked) offerPasskey(passkeys, header, raw);
+      else raw.fill(0);
+      await showForget();
     } catch (e) {
       $("msg-error").textContent = e.message;
     } finally {

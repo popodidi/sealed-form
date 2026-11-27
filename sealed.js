@@ -177,11 +177,58 @@ export function parseMessage(text) {
 
 /** The AES key from the passphrase (non-extractable, decrypt only). */
 export async function replyKey(passphrase, salt, iter) {
+  return importReplyKey(await replyKeyBits(passphrase, salt, iter));
+}
+
+/** The reply key's 32 bytes from the passphrase, for wrapping to a passkey. */
+export async function replyKeyBits(passphrase, salt, iter) {
   const base = await subtle.importKey(
-    "raw", new TextEncoder().encode(passphrase), "PBKDF2", false, ["deriveKey"]);
+    "raw", new TextEncoder().encode(passphrase), "PBKDF2", false, ["deriveBits"]);
+  return new Uint8Array(await subtle.deriveBits(
+    { name: "PBKDF2", hash: "SHA-256", salt: b64urlDecode(salt), iterations: iter }, base, 256));
+}
+
+/** The reply key's bytes as a non-extractable, decrypt-only AES key. */
+export function importReplyKey(raw) {
+  return subtle.importKey("raw", raw, { name: "AES-GCM" }, false, ["decrypt"]);
+}
+
+// Passkey unlock: a passkey's WebAuthn PRF output (32 bytes, never stored)
+// wraps the reply key on this device. Wrapping key: HKDF-SHA256(PRF output,
+// salt = the entry's PRF input, info WRAP_INFO); the reply key is
+// AES-256-GCM encrypted under it, the key id ("<salt>:<iter>" of the
+// message header) as associated data, so a wrapped key opens only for the
+// reply key it was made for.
+
+const WRAP_INFO = new TextEncoder().encode("sealed-form passkey v1");
+
+async function wrappingKey(prf, prfSalt, usage) {
+  const ikm = await subtle.importKey("raw", prf, "HKDF", false, ["deriveKey"]);
   return subtle.deriveKey(
-    { name: "PBKDF2", hash: "SHA-256", salt: b64urlDecode(salt), iterations: iter },
-    base, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+    { name: "HKDF", hash: "SHA-256", salt: prfSalt, info: WRAP_INFO },
+    ikm, { name: "AES-GCM", length: 256 }, false, [usage]);
+}
+
+/** Wraps the reply key `raw` under a PRF output; returns {iv, wrapped} (base64url). */
+export async function wrapReplyKey(prf, prfSalt, raw, keyId) {
+  const iv = globalThis.crypto.getRandomValues(new Uint8Array(12));
+  const ct = await subtle.encrypt(
+    { name: "AES-GCM", iv, additionalData: new TextEncoder().encode(keyId) },
+    await wrappingKey(prf, prfSalt, "encrypt"), raw);
+  return { iv: b64urlEncode(iv), wrapped: b64urlEncode(new Uint8Array(ct)) };
+}
+
+/** Unwraps to the non-extractable reply key; throws on a wrong PRF output or key id. */
+export async function unwrapReplyKey(prf, prfSalt, entry, keyId) {
+  let raw;
+  try {
+    raw = await subtle.decrypt(
+      { name: "AES-GCM", iv: b64urlDecode(entry.iv), additionalData: new TextEncoder().encode(keyId) },
+      await wrappingKey(prf, prfSalt, "decrypt"), b64urlDecode(entry.wrapped));
+  } catch (_) {
+    throw new Error("this passkey does not open this reply key");
+  }
+  return importReplyKey(new Uint8Array(raw));
 }
 
 /**
