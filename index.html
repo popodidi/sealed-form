@@ -41,6 +41,11 @@
   <section id="message" hidden>
     <h1>Sealed message</h1>
     <p id="msg-from" class="muted"></p>
+    <div class="actions">
+      <button id="msg-passkey" class="primary" type="button" hidden>Open with Face ID</button>
+      <button id="msg-browser" type="button" hidden>Open in your browser to use Face ID</button>
+    </div>
+    <p id="msg-passkey-note" class="muted"></p>
     <form id="msg-unlock" autocomplete="off" novalidate>
       <div class="field">
         <label for="msg-pass">Passphrase</label>
@@ -54,7 +59,7 @@
       <dt>Expires</dt><dd id="msg-expires"></dd>
     </dl>
     <p id="msg-note" class="muted"></p>
-    <p class="muted">The message is decrypted in this browser with your passphrase. This page sends nothing anywhere.</p>
+    <p class="muted">The message is decrypted in this browser with your passphrase or this device's passkey. This page sends nothing anywhere.</p>
   </section>
   <section id="shown" hidden>
     <h1 id="shown-purpose"></h1>
@@ -72,11 +77,16 @@
       <a id="file-download" class="button primary">Download</a>
     </div>
     <p id="shown-note" class="muted"></p>
+    <div id="enroll" class="actions" hidden>
+      <button id="enroll-button" type="button">Use Face ID next time</button>
+      <p id="enroll-note" class="muted">Saves the key on this device, locked by a passkey (Face ID, Touch ID or the device PIN). The passphrase keeps working.</p>
+    </div>
   </section>
   <section id="sent" hidden>
     <h1>Sent</h1>
     <p id="sent-text"></p>
   </section>
+  <p class="device"><button id="forget-device" type="button" hidden>Forget this device</button></p>
 </main>
 </body>
 </html>

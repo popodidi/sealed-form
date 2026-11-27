@@ -25,6 +25,19 @@ it; [axe](https://github.com/popodidi/axe) (`axe form ask`) does.
   AES-256-GCM, the header as associated data. It refuses a message past its
   expiry, can remember the derived key (non-extractable, IndexedDB) and warns
   when a message was opened on this device before.
+- **Passkey unlock.** After a passphrase unlock, where the browser has a
+  platform passkey with the WebAuthn PRF extension (Safari on iOS 18+), the
+  page offers "Use Face ID next time": it registers a passkey for this host,
+  derives a wrapping key from the passkey's PRF output (HKDF-SHA256, info
+  `sealed-form passkey v1`) and stores only the key wrapped under it
+  (AES-256-GCM, the reply key id `<salt>:<iter>` as associated data) in
+  IndexedDB ([`device.js`](device.js), [`passkey.js`](passkey.js)). Later
+  opens take one passkey prompt. The PRF output and the key never leave the
+  device. A new reply key (new salt) makes the stored entry stale: the page
+  deletes it and asks for the passphrase, which always stays the recovery
+  path. "Forget this device" deletes every saved key (the passkey itself stays
+  in the device's password manager). In-app browsers without passkeys (the
+  Telegram Mini App on iOS) offer to open the message in the system browser.
 
 Everything is in [`sealed.js`](sealed.js) (crypto) and [`app.js`](app.js)
 (page). There is no build step and no third-party script, and the CSP allows

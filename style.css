@@ -57,3 +57,4 @@ button.primary, .button.primary { background: var(--action-bg); color: var(--act
 code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8125rem; word-break: break-all; }
 .check { display: flex; gap: 0.5rem; align-items: center; font-weight: 400; }
 .check input { width: auto; }
+.device { margin-top: 2rem; }
