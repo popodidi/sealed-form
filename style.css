@@ -31,6 +31,12 @@ h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 0.25rem; }
 p { margin: 0.5rem 0; }
 .muted { color: var(--text-secondary); font-size: 0.875rem; }
 .error { color: var(--danger); min-height: 1.5em; }
+.field-error { margin: 0; font-size: 0.875rem; min-height: 0; }
+.field-error:empty { display: none; }
+[aria-invalid="true"] { border-color: var(--danger); }
+.secret { display: grid; grid-template-columns: 1fr auto; gap: 0.5rem; }
+.secret .toggle { min-width: 4.5rem; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
 .warn { color: var(--warning); font-weight: 600; }
 form { margin: 1.25rem 0 0.5rem; display: grid; gap: 1rem; }
 .field { display: grid; gap: 0.25rem; }
